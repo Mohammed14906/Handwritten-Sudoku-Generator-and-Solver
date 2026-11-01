@@ -42,13 +42,15 @@ class SudokuCSP:
         self.stats = {"assignments": 0, "backtracks": 0, "arc_checks": 0, "solved": False}
         self._init_domains()
 
+        use_fc = method == "BT+FC"
+
         assignment = {}
         for r in range(9):
             for c in range(9):
                 if self.grid[r, c] != 0:
                     assignment[(r, c)] = self.grid[r, c]
 
-        result = self._backtrack(assignment)
+        result = self._backtrack(assignment, use_fc)
         if result is not None:
             solution = np.zeros((9, 9), dtype=int)
             for (r, c), v in result.items():
@@ -68,7 +70,7 @@ class SudokuCSP:
                     best = var
         return best
 
-    def _backtrack(self, assignment):
+    def _backtrack(self, assignment, use_fc):
         if len(assignment) == 81:
             return assignment
 
@@ -84,9 +86,14 @@ class SudokuCSP:
                 old_domains = deepcopy(self.domains)
                 self.domains[var] = {value}
 
-                result = self._backtrack(assignment)
-                if result is not None:
-                    return result
+                ok = True
+                if use_fc:
+                    ok = self._forward_check(var, value)
+
+                if ok:
+                    result = self._backtrack(assignment, use_fc)
+                    if result is not None:
+                        return result
 
                 self.stats["backtracks"] += 1
                 del assignment[var]
@@ -98,6 +105,14 @@ class SudokuCSP:
         for nb in self.neighbors[var]:
             if nb in assignment and assignment[nb] == value:
                 return False
+        return True
+
+    def _forward_check(self, var, value):
+        for nb in self.neighbors[var]:
+            if len(self.domains[nb]) > 1 and value in self.domains[nb]:
+                self.domains[nb] = self.domains[nb] - {value}
+                if len(self.domains[nb]) == 0:
+                    return False
         return True
 
 
