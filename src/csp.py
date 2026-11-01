@@ -42,7 +42,12 @@ class SudokuCSP:
         self.stats = {"assignments": 0, "backtracks": 0, "arc_checks": 0, "solved": False}
         self._init_domains()
 
-        use_fc = method == "BT+FC"
+        use_fc = method in ("BT+FC", "BT+FC+AC3")
+        use_ac3 = method == "BT+FC+AC3"
+
+        if use_ac3:
+            if not self._ac3():
+                return None, self.stats
 
         assignment = {}
         for r in range(9):
@@ -50,7 +55,7 @@ class SudokuCSP:
                 if self.grid[r, c] != 0:
                     assignment[(r, c)] = self.grid[r, c]
 
-        result = self._backtrack(assignment, use_fc)
+        result = self._backtrack(assignment, use_fc, use_ac3)
         if result is not None:
             solution = np.zeros((9, 9), dtype=int)
             for (r, c), v in result.items():
@@ -70,7 +75,7 @@ class SudokuCSP:
                     best = var
         return best
 
-    def _backtrack(self, assignment, use_fc):
+    def _backtrack(self, assignment, use_fc, use_ac3):
         if len(assignment) == 81:
             return assignment
 
@@ -89,9 +94,13 @@ class SudokuCSP:
                 ok = True
                 if use_fc:
                     ok = self._forward_check(var, value)
+                if ok and use_ac3:
+                    arcs = [(nb, var) for nb in self.neighbors[var]
+                            if nb not in assignment]
+                    ok = self._ac3(arcs)
 
                 if ok:
-                    result = self._backtrack(assignment, use_fc)
+                    result = self._backtrack(assignment, use_fc, use_ac3)
                     if result is not None:
                         return result
 
@@ -114,6 +123,35 @@ class SudokuCSP:
                 if len(self.domains[nb]) == 0:
                     return False
         return True
+
+    def _ac3(self, arcs=None):
+        if arcs is None:
+            arcs = []
+            for var in self.domains:
+                for nb in self.neighbors[var]:
+                    arcs.append((var, nb))
+
+        queue = list(arcs)
+        while queue:
+            xi, xj = queue.pop(0)
+            if self._revise(xi, xj):
+                if len(self.domains[xi]) == 0:
+                    return False
+                for xk in self.neighbors[xi]:
+                    if xk != xj:
+                        queue.append((xk, xi))
+        return True
+
+    def _revise(self, xi, xj):
+        revised = False
+        to_remove = set()
+        for val in self.domains[xi]:
+            self.stats["arc_checks"] += 1
+            if not any(val != v2 for v2 in self.domains[xj]):
+                to_remove.add(val)
+                revised = True
+        self.domains[xi] -= to_remove
+        return revised
 
 
 def is_valid_complete(grid):
@@ -150,6 +188,31 @@ def find_conflicts(grid):
             vals = [grid[r, c] for r, c in cells]
             _check_unit(vals, cells, conflicts)
     return list(conflicts)
+
+
+def count_conflict_groups(grid):
+    """Count distinct (unit, digit) conflict groups. Each group needs >= 1 correction."""
+    grid = np.array(grid, dtype=int)
+    groups = set()
+    for i in range(9):
+        _count_unit_groups(grid[i, :], "row", i, groups)
+        _count_unit_groups(grid[:, i], "col", i, groups)
+    for br in range(0, 9, 3):
+        for bc in range(0, 9, 3):
+            vals = grid[br:br+3, bc:bc+3].flatten()
+            _count_unit_groups(vals, "box", (br, bc), groups)
+    return len(groups)
+
+
+def _count_unit_groups(values, unit_type, unit_id, groups):
+    seen = {}
+    for val in values:
+        if val == 0:
+            continue
+        if val in seen:
+            groups.add((unit_type, unit_id, val))
+        else:
+            seen[val] = True
 
 
 def _check_unit(values, cells, conflicts):
