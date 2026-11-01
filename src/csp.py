@@ -38,6 +38,68 @@ class SudokuCSP:
                             nbrs.add((nr, nc))
                 self.neighbors[(r, c)] = nbrs
 
+    def solve(self, method="BT"):
+        self.stats = {"assignments": 0, "backtracks": 0, "arc_checks": 0, "solved": False}
+        self._init_domains()
+
+        assignment = {}
+        for r in range(9):
+            for c in range(9):
+                if self.grid[r, c] != 0:
+                    assignment[(r, c)] = self.grid[r, c]
+
+        result = self._backtrack(assignment)
+        if result is not None:
+            solution = np.zeros((9, 9), dtype=int)
+            for (r, c), v in result.items():
+                solution[r, c] = v
+            self.stats["solved"] = True
+            return solution, self.stats
+        return None, self.stats
+
+    def _select_unassigned(self, assignment):
+        min_size = 10
+        best = None
+        for var in self.domains:
+            if var not in assignment:
+                size = len(self.domains[var])
+                if size < min_size:
+                    min_size = size
+                    best = var
+        return best
+
+    def _backtrack(self, assignment):
+        if len(assignment) == 81:
+            return assignment
+
+        var = self._select_unassigned(assignment)
+        if var is None:
+            return None
+
+        for value in sorted(self.domains[var]):
+            if self._is_consistent(var, value, assignment):
+                assignment[var] = value
+                self.stats["assignments"] += 1
+
+                old_domains = deepcopy(self.domains)
+                self.domains[var] = {value}
+
+                result = self._backtrack(assignment)
+                if result is not None:
+                    return result
+
+                self.stats["backtracks"] += 1
+                del assignment[var]
+                self.domains = old_domains
+
+        return None
+
+    def _is_consistent(self, var, value, assignment):
+        for nb in self.neighbors[var]:
+            if nb in assignment and assignment[nb] == value:
+                return False
+        return True
+
 
 def is_valid_complete(grid):
     grid = np.array(grid, dtype=int)
