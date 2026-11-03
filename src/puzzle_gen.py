@@ -1,6 +1,93 @@
-"""Sudoku mosaic image generator."""
+"""Sudoku puzzle generator and mosaic image generator."""
 
 import numpy as np
+from src.csp import SudokuCSP, is_valid_complete
+
+
+def generate_full_grid(seed=42):
+    """Generate a complete valid Sudoku grid using randomized backtracking."""
+    rng = np.random.default_rng(seed)
+    grid = np.zeros((9, 9), dtype=int)
+
+    def _fill(pos):
+        if pos == 81:
+            return True
+        r, c = pos // 9, pos % 9
+        digits = list(range(1, 10))
+        rng.shuffle(digits)
+        for d in digits:
+            if _can_place(grid, r, c, d):
+                grid[r, c] = d
+                if _fill(pos + 1):
+                    return True
+                grid[r, c] = 0
+        return False
+
+    _fill(0)
+    return grid
+
+
+def _can_place(grid, r, c, d):
+    if d in grid[r, :]:
+        return False
+    if d in grid[:, c]:
+        return False
+    br, bc = 3 * (r // 3), 3 * (c // 3)
+    if d in grid[br:br+3, bc:bc+3]:
+        return False
+    return True
+
+
+def _has_unique_solution(puzzle):
+    """Check if puzzle has exactly one solution (use CSP to count up to 2)."""
+    solutions = [0]
+
+    def _count(grid, pos):
+        if solutions[0] >= 2:
+            return
+        if pos == 81:
+            solutions[0] += 1
+            return
+        r, c = pos // 9, pos % 9
+        if grid[r, c] != 0:
+            _count(grid, pos + 1)
+            return
+        for d in range(1, 10):
+            if _can_place(grid, r, c, d):
+                grid[r, c] = d
+                _count(grid, pos + 1)
+                grid[r, c] = 0
+
+    _count(puzzle.copy(), 0)
+    return solutions[0] == 1
+
+
+def generate_puzzle(n_givens, seed=42):
+    """Generate a puzzle with n_givens filled cells and a unique solution."""
+    rng = np.random.default_rng(seed)
+    solution = generate_full_grid(seed)
+    puzzle = solution.copy()
+
+    filled = list(range(81))
+    rng.shuffle(filled)
+
+    removed = 0
+    target_removals = 81 - n_givens
+
+    for pos in filled:
+        if removed >= target_removals:
+            break
+        r, c = pos // 9, pos % 9
+        old_val = puzzle[r, c]
+        if old_val == 0:
+            continue
+        puzzle[r, c] = 0
+        if _has_unique_solution(puzzle):
+            removed += 1
+        else:
+            puzzle[r, c] = old_val
+
+    return puzzle, solution
 
 
 def generate_mosaic(puzzle, digit_images, seed=42):
