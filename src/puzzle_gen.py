@@ -1,4 +1,4 @@
-"""Sudoku puzzle generator and mosaic image generator."""
+"""Sudoku puzzle generator, misread injector, and mosaic image generator."""
 
 import numpy as np
 from src.csp import SudokuCSP, is_valid_complete
@@ -88,6 +88,44 @@ def generate_puzzle(n_givens, seed=42):
             puzzle[r, c] = old_val
 
     return puzzle, solution
+
+
+CONFUSION_PAIRS = {
+    1: [7, 2],
+    2: [3, 7],
+    3: [5, 8],
+    4: [9, 6],
+    5: [3, 6],
+    6: [4, 5],
+    7: [1, 9],
+    8: [3, 9],
+    9: [4, 7],
+}
+
+
+def introduce_misreads(puzzle, solution, n_misreads, seed=42):
+    """Replace n_misreads given cells with commonly-confused digits.
+
+    Uses a documented confusion rule: each digit maps to its most likely
+    misclassifications (based on typical NN confusion patterns for MNIST).
+    """
+    rng = np.random.default_rng(seed)
+    corrupted = puzzle.copy()
+
+    given_cells = [(r, c) for r in range(9) for c in range(9) if puzzle[r, c] != 0]
+    rng.shuffle(given_cells)
+
+    log = []
+    for r, c in given_cells:
+        if len(log) >= n_misreads:
+            break
+        true_digit = puzzle[r, c]
+        confusable = CONFUSION_PAIRS.get(true_digit, [d for d in range(1, 10) if d != true_digit])
+        wrong_digit = rng.choice(confusable)
+        corrupted[r, c] = wrong_digit
+        log.append((r, c, true_digit, wrong_digit))
+
+    return corrupted, log
 
 
 def generate_mosaic(puzzle, digit_images, seed=42):
