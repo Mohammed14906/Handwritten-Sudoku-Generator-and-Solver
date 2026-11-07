@@ -1,4 +1,4 @@
-"""Correction search: UCS for finding cheapest digit corrections."""
+"""Correction search: UCS, Greedy, and A* for finding cheapest digit corrections."""
 
 import heapq
 import numpy as np
@@ -82,7 +82,7 @@ class CorrectionSearchProblem:
 
 def search(problem, strategy="UCS"):
     """
-    Search for the cheapest correction set using Uniform Cost Search.
+    Search for the cheapest correction set.
 
     Returns:
         (state, stats) where state is frozenset of corrections or None
@@ -96,8 +96,18 @@ def search(problem, strategy="UCS"):
         stats["found"] = True
         return initial, stats
 
+    # Priority queue: (priority, tie_breaker, cost_so_far, state)
     counter = 0
-    frontier = [(0.0, counter, 0.0, initial)]
+    if strategy == "UCS":
+        start_priority = 0.0
+    elif strategy == "Greedy":
+        start_priority = problem.heuristic(initial)
+    elif strategy == "A*":
+        start_priority = problem.heuristic(initial)
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+    frontier = [(start_priority, counter, 0.0, initial)]
     visited = set()
     visited.add(initial)
 
@@ -120,7 +130,15 @@ def search(problem, strategy="UCS"):
 
             new_g = g + action_cost
             stats["nodes_generated"] += 1
+
+            if strategy == "UCS":
+                new_priority = new_g
+            elif strategy == "Greedy":
+                new_priority = problem.heuristic(new_state)
+            elif strategy == "A*":
+                new_priority = new_g + problem.heuristic(new_state)
+
             counter += 1
-            heapq.heappush(frontier, (new_g, counter, new_g, new_state))
+            heapq.heappush(frontier, (new_priority, counter, new_g, new_state))
 
     return None, stats
