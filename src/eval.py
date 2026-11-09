@@ -132,3 +132,102 @@ def _plot_experiment_1(csv_path, misread_levels, strategies):
     plt.tight_layout()
     plt.savefig(os.path.join(EXPERIMENTS_DIR, "exp1_plot.png"), dpi=150)
     plt.close()
+
+
+def run_experiment_2(seeds=None, given_levels=None, n_puzzles=100, verbose=True):
+    """Experiment 2: BT vs BT+FC vs BT+FC+AC3 on puzzles with 25, 30, 35 givens."""
+    _ensure_dir()
+    if seeds is None:
+        seeds = [1, 2, 3, 4, 5]
+    if given_levels is None:
+        given_levels = [25, 30, 35]
+    methods = ["BT", "BT+FC", "BT+FC+AC3"]
+
+    csv_path = os.path.join(EXPERIMENTS_DIR, "exp2_results.csv")
+    rows = []
+
+    for seed in seeds:
+        for n_givens in given_levels:
+            for method in methods:
+                bt_list = []
+                assign_list = []
+                time_list = []
+
+                for puzzle_idx in range(n_puzzles):
+                    p_seed = seed * 10000 + puzzle_idx
+                    puzzle, solution = generate_puzzle(n_givens, seed=p_seed)
+                    csp = SudokuCSP(puzzle)
+
+                    t0 = time.time()
+                    sol, stats = csp.solve(method)
+                    elapsed = time.time() - t0
+
+                    bt_list.append(stats["backtracks"])
+                    assign_list.append(stats["assignments"])
+                    time_list.append(elapsed)
+
+                rows.append({
+                    "seed": seed,
+                    "givens": n_givens,
+                    "method": method,
+                    "mean_backtracks": np.mean(bt_list),
+                    "std_backtracks": np.std(bt_list),
+                    "mean_assignments": np.mean(assign_list),
+                    "std_assignments": np.std(assign_list),
+                    "mean_time": np.mean(time_list),
+                    "n_puzzles": n_puzzles,
+                })
+
+                if verbose:
+                    print(f"  Exp2: seed={seed}, givens={n_givens}, {method}: "
+                          f"bt={np.mean(bt_list):.1f}\u00b1{np.std(bt_list):.1f}, "
+                          f"assign={np.mean(assign_list):.1f}")
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+    _plot_experiment_2(csv_path, given_levels, methods)
+    return csv_path
+
+
+def _plot_experiment_2(csv_path, given_levels, methods):
+    import csv as csv_module
+    with open(csv_path) as f:
+        reader = csv_module.DictReader(f)
+        data = list(reader)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    x = np.arange(len(given_levels))
+    width = 0.25
+
+    for i, method in enumerate(methods):
+        bt_means = []
+        assign_means = []
+        for gl in given_levels:
+            subset = [r for r in data if int(r["givens"]) == gl and r["method"] == method]
+            bt_means.append(np.mean([float(r["mean_backtracks"]) for r in subset]))
+            assign_means.append(np.mean([float(r["mean_assignments"]) for r in subset]))
+        ax1.bar(x + i * width, bt_means, width, label=method)
+        ax2.bar(x + i * width, assign_means, width, label=method)
+
+    ax1.set_xlabel("Number of Givens")
+    ax1.set_ylabel("Backtracks (mean)")
+    ax1.set_title("Exp 2: Backtracks by CSP Method")
+    ax1.set_xticks(x + width)
+    ax1.set_xticklabels(given_levels)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis="y")
+
+    ax2.set_xlabel("Number of Givens")
+    ax2.set_ylabel("Assignments (mean)")
+    ax2.set_title("Exp 2: Assignments by CSP Method")
+    ax2.set_xticks(x + width)
+    ax2.set_xticklabels(given_levels)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(EXPERIMENTS_DIR, "exp2_plot.png"), dpi=150)
+    plt.close()
