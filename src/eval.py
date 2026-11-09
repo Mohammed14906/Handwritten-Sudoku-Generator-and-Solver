@@ -38,8 +38,71 @@ def _make_probs_from_solution(puzzle, solution, corrupted, seed=42):
     return probs
 
 
+def run_nn_comparison(verbose=True):
+    """Compare NN vs logistic regression baseline. Saves confusion matrix and metrics."""
+    _ensure_dir()
+    from src.data import load_splits
+    from src import nn as nn_module
+    from src import baseline as baseline_module
+
+    X_train, y_train, X_val, y_val, X_test, y_test = load_splits()
+
+    if verbose:
+        print("Training neural network...")
+    nn_model = nn_module.train(X_train, y_train, X_val, y_val,
+                               epochs=30, lr=0.05, batch_size=128, seed=42, verbose=False)
+
+    if verbose:
+        print("Training logistic regression baseline...")
+    lr_model = baseline_module.train(X_train, y_train, X_val, y_val, seed=42, verbose=False)
+
+    nn_acc = nn_module.accuracy(nn_model, X_test, y_test)
+    lr_acc = (baseline_module.predict(lr_model, X_test) == y_test).mean()
+    nn_ece = nn_module.expected_calibration_error(nn_model, X_test, y_test)
+    nn_cm = nn_module.confusion_matrix(nn_model, X_test, y_test)
+
+    if verbose:
+        print(f"\n--- NN vs Baseline Comparison ---")
+        print(f"Neural Network  - Accuracy: {nn_acc:.4f}, ECE: {nn_ece:.4f}")
+        print(f"Logistic Regr.  - Accuracy: {lr_acc:.4f}")
+
+    # Save confusion matrix plot
+    fig, ax = plt.subplots(figsize=(8, 7))
+    im = ax.imshow(nn_cm, cmap="Blues")
+    ax.set_xticks(range(9))
+    ax.set_yticks(range(9))
+    ax.set_xticklabels(range(1, 10))
+    ax.set_yticklabels(range(1, 10))
+    ax.set_xlabel("Predicted Digit")
+    ax.set_ylabel("True Digit")
+    ax.set_title(f"NN Confusion Matrix (acc={nn_acc:.4f}, ECE={nn_ece:.4f})")
+    for i in range(9):
+        for j in range(9):
+            val = nn_cm[i, j]
+            color = "white" if val > nn_cm.max() / 2 else "black"
+            ax.text(j, i, str(val), ha="center", va="center", color=color, fontsize=8)
+    plt.colorbar(im)
+    plt.tight_layout()
+    plt.savefig(os.path.join(EXPERIMENTS_DIR, "nn_confusion_matrix.png"), dpi=150)
+    plt.close()
+
+    # Save comparison CSV
+    csv_path = os.path.join(EXPERIMENTS_DIR, "nn_vs_baseline.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "accuracy", "ece"])
+        writer.writerow(["neural_network", f"{nn_acc:.4f}", f"{nn_ece:.4f}"])
+        writer.writerow(["logistic_regression", f"{lr_acc:.4f}", "N/A"])
+
+    if verbose:
+        print(f"Confusion matrix saved to experiments/nn_confusion_matrix.png")
+        print(f"Comparison saved to experiments/nn_vs_baseline.csv")
+
+    return nn_model, {"nn_acc": nn_acc, "lr_acc": lr_acc, "nn_ece": nn_ece}
+
+
 def run_experiment_1(seeds=None, misread_levels=None, n_puzzles=100, n_givens=30, verbose=True):
-    """Experiment 1: UCS vs Greedy vs A* -- nodes and recovery rate for 0-4 misreads."""
+    """Experiment 1: UCS vs Greedy vs A* — nodes and recovery rate for 0-4 misreads."""
     _ensure_dir()
     if seeds is None:
         seeds = [1, 2, 3, 4, 5]
@@ -84,7 +147,7 @@ def run_experiment_1(seeds=None, misread_levels=None, n_puzzles=100, n_givens=30
 
                 if verbose:
                     print(f"  Exp1: seed={seed}, misreads={n_misreads}, {strategy}: "
-                          f"nodes={np.mean(expanded_list):.1f}\u00b1{np.std(expanded_list):.1f}, "
+                          f"nodes={np.mean(expanded_list):.1f}±{np.std(expanded_list):.1f}, "
                           f"recovery={recovered}/{n_puzzles}")
 
     with open(csv_path, "w", newline="") as f:
@@ -117,7 +180,7 @@ def _plot_experiment_1(csv_path, misread_levels, strategies):
         ax2.plot(misread_levels, recovery, marker="s", label=strategy)
 
     ax1.set_xlabel("Number of Misreads")
-    ax1.set_ylabel("Nodes Expanded (mean \u00b1 std)")
+    ax1.set_ylabel("Nodes Expanded (mean ± std)")
     ax1.set_title("Exp 1: Search Nodes by Strategy")
     ax1.legend()
     ax1.grid(True, alpha=0.3)
@@ -180,7 +243,7 @@ def run_experiment_2(seeds=None, given_levels=None, n_puzzles=100, verbose=True)
 
                 if verbose:
                     print(f"  Exp2: seed={seed}, givens={n_givens}, {method}: "
-                          f"bt={np.mean(bt_list):.1f}\u00b1{np.std(bt_list):.1f}, "
+                          f"bt={np.mean(bt_list):.1f}±{np.std(bt_list):.1f}, "
                           f"assign={np.mean(assign_list):.1f}")
 
     with open(csv_path, "w", newline="") as f:
@@ -230,4 +293,101 @@ def _plot_experiment_2(csv_path, given_levels, methods):
 
     plt.tight_layout()
     plt.savefig(os.path.join(EXPERIMENTS_DIR, "exp2_plot.png"), dpi=150)
+    plt.close()
+
+
+def run_experiment_3(seeds=None, misread_levels=None, n_puzzles=100, n_givens=30, verbose=True):
+    """Experiment 3: NN-guided vs no correction vs random correction."""
+    _ensure_dir()
+    if seeds is None:
+        seeds = [1, 2, 3, 4, 5]
+    if misread_levels is None:
+        misread_levels = [0, 1, 2, 3, 4]
+    modes = ["nn_guided", "no_correction", "random"]
+
+    csv_path = os.path.join(EXPERIMENTS_DIR, "exp3_results.csv")
+    rows = []
+
+    for seed in seeds:
+        for n_misreads in misread_levels:
+            for mode in modes:
+                recovered = 0
+
+                for puzzle_idx in range(n_puzzles):
+                    p_seed = seed * 10000 + puzzle_idx
+                    puzzle, solution = generate_puzzle(n_givens, seed=p_seed)
+
+                    if n_misreads > 0:
+                        corrupted, _ = introduce_misreads(puzzle, solution, n_misreads, seed=p_seed + 1)
+                    else:
+                        corrupted = puzzle
+
+                    probs = _make_probs_from_solution(puzzle, solution, corrupted, seed=p_seed + 2)
+
+                    if mode == "nn_guided":
+                        result = solve_from_grid(corrupted, probs, "BT+FC+AC3", "A*", max_corrections=3)
+                    elif mode == "no_correction":
+                        csp = SudokuCSP(corrupted)
+                        sol, _ = csp.solve("BT+FC+AC3")
+                        result = {"solution": sol, "solved": sol is not None}
+                    elif mode == "random":
+                        rng = np.random.default_rng(p_seed + 3)
+                        rand_probs = rng.random((81, 9)).astype(np.float32)
+                        rand_probs = rand_probs / rand_probs.sum(axis=1, keepdims=True)
+                        result = solve_from_grid(corrupted, rand_probs, "BT+FC+AC3", "A*", max_corrections=3)
+
+                    if result["solved"] and result.get("solution") is not None:
+                        if np.array_equal(result["solution"], solution):
+                            recovered += 1
+
+                rows.append({
+                    "seed": seed,
+                    "misreads": n_misreads,
+                    "mode": mode,
+                    "recovery_rate": recovered / n_puzzles,
+                    "n_puzzles": n_puzzles,
+                })
+
+                if verbose:
+                    print(f"  Exp3: seed={seed}, misreads={n_misreads}, {mode}: "
+                          f"recovery={recovered}/{n_puzzles}")
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+    _plot_experiment_3(csv_path, misread_levels, modes)
+    return csv_path
+
+
+def _plot_experiment_3(csv_path, misread_levels, modes):
+    import csv as csv_module
+    with open(csv_path) as f:
+        reader = csv_module.DictReader(f)
+        data = list(reader)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = np.arange(len(misread_levels))
+    width = 0.25
+    labels = {"nn_guided": "NN-Guided", "no_correction": "No Correction", "random": "Random"}
+
+    for i, mode in enumerate(modes):
+        rates = []
+        for ml in misread_levels:
+            subset = [r for r in data if int(r["misreads"]) == ml and r["mode"] == mode]
+            rates.append(np.mean([float(r["recovery_rate"]) for r in subset]))
+        ax.bar(x + i * width, rates, width, label=labels[mode])
+
+    ax.set_xlabel("Number of Misreads")
+    ax.set_ylabel("Exact Recovery Rate")
+    ax.set_title("Exp 3: Correction Strategy Comparison")
+    ax.set_xticks(x + width)
+    ax.set_xticklabels(misread_levels)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
+    ax.set_ylim(0, 1.05)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(EXPERIMENTS_DIR, "exp3_plot.png"), dpi=150)
     plt.close()
