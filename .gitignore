@@ -1,0 +1,41 @@
+# Data
+data/
+models/*.pkl
+models/*.npz
+
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Experiments output (keep CSVs, ignore large files)
+experiments/*.png
+experiments/*.pdf
+
+# Misc
+*.log
+.env
+
+# Plans
+.plans/
+
+# Internal docs (not for submission)
+docs/
